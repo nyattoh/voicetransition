@@ -1,0 +1,1135 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>声変わりシミュレータ — ローカル研究版</title>
+  <style>
+    :root {
+      --bg: #070b16;
+      --panel: #10182a;
+      --panel-2: #151f36;
+      --line: #2b3c60;
+      --text: #f3f6ff;
+      --muted: #b7c3dc;
+      --accent: #66dcff;
+      --accent-2: #a9f3c6;
+      --warn: #ffd39a;
+      --danger: #ffb0ba;
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top, #12203c 0, var(--bg) 38rem);
+      color: var(--text);
+      font: 16px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    header, main, footer { width: min(100% - 28px, 1000px); margin-inline: auto; }
+    header { padding: 34px 0 18px; }
+    h1 { margin: 0 0 8px; font-size: clamp(1.6rem, 4vw, 2.55rem); line-height: 1.18; }
+    h2 { margin: 0 0 14px; font-size: 1.22rem; }
+    h3 { margin: 18px 0 6px; font-size: 1rem; }
+    p { margin: 8px 0; }
+    a { color: var(--accent); }
+    .lead { color: var(--muted); max-width: 72ch; }
+    .card {
+      margin: 14px 0;
+      padding: clamp(16px, 3vw, 24px);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: color-mix(in srgb, var(--panel) 94%, transparent);
+      box-shadow: 0 16px 42px rgb(0 0 0 / .24);
+    }
+    .notice { border-color: #42678d; background: #101d32; }
+    .warning { color: var(--warn); }
+    .danger { color: var(--danger); }
+    .ok { color: var(--accent-2); }
+    .muted, small { color: var(--muted); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(245px, 1fr)); gap: 14px; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .stack { display: grid; gap: 9px; }
+    .metric {
+      min-height: 84px;
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel-2);
+    }
+    .metric strong { display: block; margin-top: 2px; font-size: 1.24rem; }
+    button, select, input[type="file"] {
+      max-width: 100%;
+      min-height: 44px;
+      border: 1px solid #45618e;
+      border-radius: 11px;
+      background: #1a2a49;
+      color: var(--text);
+      padding: 9px 13px;
+      font: inherit;
+    }
+    button { cursor: pointer; font-weight: 700; }
+    button:hover:not(:disabled) { border-color: var(--accent); }
+    button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--accent) 60%, transparent);
+      outline-offset: 2px;
+    }
+    button:disabled { cursor: not-allowed; opacity: .5; }
+    .primary { background: #0b6f88; border-color: #50d4f4; }
+    .secondary { background: #24304a; }
+    label { display: grid; gap: 5px; color: var(--muted); }
+    input[type="range"] { width: 100%; accent-color: var(--accent); }
+    audio { width: 100%; margin-top: 10px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      padding: 3px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #0b1222;
+      color: var(--muted);
+      font-size: .9rem;
+    }
+    progress { width: 100%; height: 12px; accent-color: var(--accent); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; }
+    th { color: var(--muted); font-weight: 600; }
+    code { color: #bcecff; }
+    ol, ul { padding-left: 1.3rem; }
+    details { margin-top: 10px; }
+    summary { cursor: pointer; color: var(--accent); }
+    .toast {
+      position: fixed;
+      inset: auto 14px 14px auto;
+      z-index: 20;
+      max-width: min(520px, calc(100% - 28px));
+      padding: 12px 15px;
+      border: 1px solid #54709c;
+      border-radius: 12px;
+      background: #101a2d;
+      box-shadow: 0 12px 36px rgb(0 0 0 / .45);
+    }
+    dialog {
+      width: min(560px, calc(100% - 28px));
+      border: 1px solid #607ba6;
+      border-radius: 16px;
+      background: var(--panel);
+      color: var(--text);
+      padding: 22px;
+    }
+    dialog::backdrop { background: rgb(0 0 0 / .72); }
+    .test-pass::before { content: "✓ "; color: var(--accent-2); }
+    .test-fail::before { content: "✗ "; color: var(--danger); }
+    footer { padding: 12px 0 42px; color: var(--muted); font-size: .9rem; }
+    @media (max-width: 540px) {
+      .row > button { flex: 1 1 100%; }
+      th, td { padding: 7px 4px; font-size: .9rem; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>声変わりシミュレータ</h1>
+    <p class="lead">10秒以内の声を端末内だけで解析し、子ども／大人女性／大人男性の音響プロファイルへ変換します。外部送信・学習・ボイスクローンは行いません。</p>
+  </header>
+
+  <main>
+    <section class="card notice" aria-labelledby="scopeTitle">
+      <h2 id="scopeTitle">このアプリが示すもの</h2>
+      <p><strong>本人の「もし別の性だったら」という声を復元するものではありません。</strong> 1本の録音だけから反実仮想の解剖・発声習慣は特定できないため、本人の話し方を残しつつ、F0（声帯側）とスペクトル包絡／VTL近似（声道側）を相対変換する知覚実験です。</p>
+      <p class="muted">「女性／男性」は性自認の判定ではなく、このページ内の便宜的な音響プロファイル名です。推定結果は必ず手動で変更できます。</p>
+    </section>
+
+    <section class="card" aria-labelledby="envTitle">
+      <h2 id="envTitle">1. 環境チェック</h2>
+      <div class="grid">
+        <div class="stack">
+          <span>Secure Context: <strong id="secureState">確認中</strong></span>
+          <span>getUserMedia: <strong id="gumState">確認中</strong></span>
+          <span>MediaRecorder: <strong id="recorderState">確認中</strong></span>
+        </div>
+        <div class="stack">
+          <span>マイク権限: <strong id="permissionState">確認中</strong></span>
+          <span>選択MIME: <code id="mimeState">—</code></span>
+          <span>AudioContext: <strong id="audioContextState">未作成</strong></span>
+        </div>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button id="enableMic" type="button">マイクを有効化</button>
+        <button id="saveHtml" type="button" class="secondary">index.html として保存</button>
+      </div>
+      <p id="envHelp" class="muted">初回は録音開始またはマイク有効化で権限ダイアログが表示されます。</p>
+    </section>
+
+    <section class="card" aria-labelledby="inputTitle">
+      <h2 id="inputTitle">2. 録音またはファイル入力</h2>
+      <div class="row">
+        <button id="record" type="button" class="primary" disabled>録音開始（最大10秒）</button>
+        <button id="stop" type="button" disabled>停止</button>
+        <span id="timer" class="pill" aria-live="polite">0.0秒</span>
+        <span id="workState" class="pill" aria-live="polite">待機中</span>
+      </div>
+      <audio id="inputAudio" controls aria-label="入力音声"></audio>
+      <label style="margin-top:12px">録音できない場合の音声ファイル
+        <input id="fileInput" type="file" accept="audio/*">
+      </label>
+      <small>ブラウザがデコードできる WAV / MP3 / M4A / WebM など。10秒を超える場合は先頭10秒だけを使います。</small>
+    </section>
+
+    <section class="card" aria-labelledby="analysisTitle">
+      <h2 id="analysisTitle">3. 音響解析</h2>
+      <div class="grid">
+        <div class="metric">F0 中央値 / IQR<strong id="f0Result">—</strong></div>
+        <div class="metric">F1 / F2 / F3 粗推定<strong id="formantResult">—</strong></div>
+        <div class="metric">VTL 近似<strong id="vtlResult">—</strong></div>
+        <div class="metric">ZCR / spectral centroid<strong id="auxResult">—</strong></div>
+      </div>
+      <div style="margin-top:14px">
+        <span>推定: <strong id="classResult">—</strong> <span id="confidenceResult" class="muted"></span></span>
+        <progress id="confidenceBar" max="1" value="0" aria-label="推定確度"></progress>
+      </div>
+      <label style="margin-top:12px">入力の音響プロファイル
+        <select id="sourceProfile" disabled>
+          <option value="">手動で選択してください</option>
+          <option value="child">子ども</option>
+          <option value="adult_f">大人女性</option>
+          <option value="adult_m">大人男性</option>
+        </select>
+      </label>
+      <p id="manualHelp" class="warning" hidden>F0と声道近似だけでは判別が曖昧です。変換前に入力プロファイルを選んでください。</p>
+    </section>
+
+    <section class="card" aria-labelledby="convertTitle">
+      <h2 id="convertTitle">4. 変換</h2>
+      <div class="grid">
+        <label>変換先
+          <select id="targetProfile">
+            <option value="child">子ども</option>
+            <option value="adult_f">大人女性</option>
+            <option value="adult_m" selected>大人男性</option>
+          </select>
+        </label>
+        <label>ピッチ微調整 <span><output id="semitoneValue">0.0</output> 半音</span>
+          <input id="semitone" type="range" min="-4" max="4" step="0.1" value="0">
+        </label>
+        <label>最終フォルマント比 <output id="formantValue">1.00</output>
+          <input id="formantRatio" type="range" min="0.8" max="1.4" step="0.01" value="1">
+        </label>
+      </div>
+      <p id="recommendation" class="muted">入力解析後に相対変換量を計算します。</p>
+      <div class="row">
+        <button id="convert" type="button" class="primary" disabled>変換する</button>
+        <a id="downloadWav" class="pill" download="voice-transition.wav" aria-disabled="true">WAVを保存</a>
+      </div>
+      <audio id="outputAudio" controls aria-label="変換後の音声"></audio>
+      <p class="muted">処理順: 相対F0比でリサンプル → WSOLAで元の長さへ復元 → スペクトル包絡を相対VTL比へワープ → OfflineAudioContextでレンダリング。</p>
+    </section>
+
+    <section class="card" aria-labelledby="evaluationTitle">
+      <h2 id="evaluationTitle">5. 評価</h2>
+      <table>
+        <thead><tr><th>指標</th><th>入力</th><th>出力</th><th>比</th></tr></thead>
+        <tbody>
+          <tr><td>median F0</td><td id="evalF0In">—</td><td id="evalF0Out">—</td><td id="evalF0Ratio">—</td></tr>
+          <tr><td>F1</td><td id="evalF1In">—</td><td id="evalF1Out">—</td><td id="evalF1Ratio">—</td></tr>
+          <tr><td>F2</td><td id="evalF2In">—</td><td id="evalF2Out">—</td><td id="evalF2Ratio">—</td></tr>
+          <tr><td>F3</td><td id="evalF3In">—</td><td id="evalF3Out">—</td><td id="evalF3Ratio">—</td></tr>
+          <tr><td>変換時間</td><td colspan="3" id="evalLatency">—</td></tr>
+        </tbody>
+      </table>
+      <div class="grid" style="margin-top:14px">
+        <label>本人らしさ（1–5）<select><option>—</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+        <label>自然さ（1–5）<select><option>—</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+        <label>目的達成感（1–5）<select><option>—</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="testTitle">
+      <h2 id="testTitle">自己テスト</h2>
+      <div class="row">
+        <button id="runTests" type="button">DSP自動テストを実行</button>
+        <span id="testSummary" class="muted">未実行</span>
+      </div>
+      <ul id="testResults" aria-live="polite"></ul>
+      <details>
+        <summary>実機チェックリスト</summary>
+        <ol>
+          <li>HTTPS または localhost で Secure Context がOKになる。</li>
+          <li>権限が prompt / unknown でも録音開始が押せ、ブラウザの許可画面が出る。</li>
+          <li>録音停止と10秒の自動停止が動作し、トラックが停止する。</li>
+          <li>ファイル入力でも解析・変換・WAV保存ができる。</li>
+          <li>低確度では入力プロファイルの手動選択が必須になる。</li>
+          <li>出力の長さが入力とほぼ同じで、F0とF1–F3の比が表示される。</li>
+          <li>about:srcdoc / sandbox では説明モーダルと保存ボタンが表示される。</li>
+          <li>Chrome / Edge / Safariでコンソールに未処理例外が出ない。</li>
+        </ol>
+      </details>
+    </section>
+
+    <section class="card" aria-labelledby="researchTitle">
+      <h2 id="researchTitle">研究根拠と限界</h2>
+      <ul>
+        <li><a href="https://pubmed.ncbi.nlm.nih.gov/27062936/">Markova et al. (2016)</a>: 思春期の声帯・声道形態、F0、フォルマント位置の変化。</li>
+        <li><a href="https://pubmed.ncbi.nlm.nih.gov/10089598/">Lee et al. (1999)</a>: 5–17歳と成人のF0・フォルマント・時間特性。</li>
+        <li><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC5966313/">Story et al. (2018)</a>: 年齢・性別依存の声道モデル。成人平均VTLは男性17.6 cm、女性15.6 cm。</li>
+        <li><a href="https://www.isca-archive.org/interspeech_2023/zhao23c_interspeech.html">Zhao et al. (2023)</a>: WORLDによるadult→child変換。F0 240–300 Hz、男性側スペクトルワープ1.2–1.4。</li>
+        <li><a href="https://doi.org/10.1121/1.1458024">de Cheveigné &amp; Kawahara (2002)</a>: YIN F0推定。</li>
+        <li><a href="https://arxiv.org/abs/2407.07235">Netzorg et al. (2024)</a>: 声の性別を固定カテゴリで扱う限界と、pitch / resonance / weightの分離。</li>
+      </ul>
+      <p class="muted">本実装はWORLDそのものではなく、学術的な分解を軽量DSPで近似します。10秒の単独録音では、声帯の厚み、閉鎖率、息漏れ、発話様式、個人の成長軌跡を復元できません。医療・本人確認・性別判定には使えません。</p>
+    </section>
+  </main>
+
+  <footer>処理はブラウザ内で完結します。録音・評価値は保存も送信もしません。</footer>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <dialog id="sandboxModal" aria-labelledby="sandboxTitle">
+    <h2 id="sandboxTitle">この表示環境では録音できません</h2>
+    <p><code>about:srcdoc</code> や microphone 権限のない sandbox iframe では、ブラウザ仕様によりマイクへアクセスできません。</p>
+    <p><strong>index.htmlとして保存し、HTTPS または localhost で開いてください。</strong> 音声ファイル入力は、マイクが使えない環境でも試せます。</p>
+    <div class="row">
+      <button id="modalSave" type="button" class="primary">index.html として保存</button>
+      <button id="modalClose" type="button">ファイル入力だけ使う</button>
+    </div>
+  </dialog>
+
+  <script>
+  "use strict";
+
+  /*
+   * 理論と式
+   * - ソース–フィルタ分解: F0は主に声帯振動、フォルマントは主に声道共鳴。
+   * - 相対ピッチ P = (profileF0_target / profileF0_source) * 2^(semitones / 12)。
+   *   入力F0を固定値へ吸着させず、プロファイル内の本人の相対位置を残す。
+   * - 一様管の近似 F_n=(2n-1)c/(4L) より、フォルマント比 Q ≈ L_source/L_target。
+   * - リサンプルでF0と包絡をP倍し、WSOLAで時間長だけを元に戻す。その後、
+   *   現在の包絡を Q/P 倍にワープして最終的なフォルマント比をQへ合わせる。
+   * - 3本のpeaking EQは既存ピークを強調するだけで移動しないため採用しない。
+   *
+   * 根拠: DOI 10.1016/j.yhbeh.2016.03.001, 10.1121/1.426686,
+   * 10.1121/1.5038264, 10.21437/Interspeech.2023-702, 10.1121/1.1458024.
+   * しきい値240/160 HzはZhao et al.の160 Hz分離と5–12歳240–300 Hzを出発点にし、
+   * LPC由来VTL近似との一致・有声率で確度を下げる。これは診断・属性判定ではない。
+   *
+   * TODO v1.1: 位相ロック型vocoderまたはpitch-synchronous処理で極端な倍率の粗さを低減。
+   * TODO v2: 明示同意した学習データがある場合のみ、RVC/属性条件付きVCをサーバ推論で選択可にする。
+   * TODO v2: CREPE-tiny (TF.js) と RNNoise (WASM) は容量・CSP・ライセンスを確認後に任意追加。
+   */
+
+  const $ = id => document.getElementById(id);
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+  const PROFILES = Object.freeze({
+    child:  { label: "子ども",   f0: 270, vtl: 14.1 },
+    adult_f:{ label: "大人女性", f0: 210, vtl: 15.6 },
+    adult_m:{ label: "大人男性", f0: 120, vtl: 17.6 }
+  });
+  const MAX_SECONDS = 10;
+  const ANALYSIS_RATE = 12000;
+
+  let audioContext = null;
+  let permissionStatus = null;
+  let recorder = null;
+  let recordStream = null;
+  let recordChunks = [];
+  let recordStartedAt = 0;
+  let recordAnimation = 0;
+  let recordTimeout = 0;
+  let selectedMime = "";
+  let inputSignal = null;
+  let inputSampleRate = 0;
+  let inputFeatures = null;
+  let inputObjectUrl = "";
+  let outputObjectUrl = "";
+  let toastTimer = 0;
+
+  function showToast(message, kind = "") {
+    const toast = $("toast");
+    toast.textContent = message;
+    toast.className = `toast ${kind}`;
+    toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.hidden = true; }, 6500);
+  }
+
+  function setWorkState(text) { $("workState").textContent = text; }
+  function setState(id, ok, text) {
+    const el = $(id);
+    el.textContent = text;
+    el.className = ok ? "ok" : "danger";
+  }
+
+  function isSecureEnough() {
+    return window.isSecureContext || location.protocol === "https:" || ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
+  }
+
+  function isSandboxedForMicrophone() {
+    if (location.protocol === "about:") return true;
+    if (window.self === window.top) return false;
+    const policy = document.permissionsPolicy || document.featurePolicy;
+    try { return policy && !policy.allowsFeature("microphone"); }
+    catch (_) { return true; }
+  }
+
+  function chooseMime() {
+    if (!("MediaRecorder" in window)) return "";
+    const candidates = ["audio/webm;codecs=opus", "audio/mp4", "audio/webm", "audio/ogg;codecs=opus"];
+    return candidates.find(type => {
+      try { return MediaRecorder.isTypeSupported(type); }
+      catch (_) { return false; }
+    }) || "";
+  }
+
+  async function readPermission() {
+    if (!navigator.permissions?.query) return "unknown";
+    try {
+      permissionStatus = await navigator.permissions.query({ name: "microphone" });
+      permissionStatus.onchange = refreshEnvironment;
+      return permissionStatus.state;
+    } catch (_) { return "unknown"; }
+  }
+
+  async function refreshEnvironment() {
+    selectedMime = chooseMime();
+    const secure = isSecureEnough();
+    const hasGum = !!navigator.mediaDevices?.getUserMedia;
+    const hasRecorder = "MediaRecorder" in window;
+    const permission = permissionStatus?.state || await readPermission();
+    setState("secureState", secure, secure ? "OK" : "NG");
+    setState("gumState", hasGum, hasGum ? "OK" : "未対応");
+    setState("recorderState", hasRecorder, hasRecorder ? "OK" : "未対応");
+    $("permissionState").textContent = permission;
+    $("permissionState").className = permission === "denied" ? "danger" : permission === "granted" ? "ok" : "warning";
+    $("mimeState").textContent = selectedMime || "ブラウザ既定";
+    $("audioContextState").textContent = audioContext?.state || "未作成";
+    const canAsk = secure && hasGum && hasRecorder && permission !== "denied" && !isSandboxedForMicrophone();
+    $("record").disabled = !canAsk || recorder?.state === "recording";
+    $("enableMic").disabled = !secure || !hasGum || isSandboxedForMicrophone();
+    $("envHelp").textContent = permission === "denied"
+      ? "マイクが拒否されています。ブラウザのサイト設定で許可するか、音声ファイルを選んでください。"
+      : !secure ? "HTTPS または localhost で開いてください。ファイル入力は利用できます。"
+      : "権限が prompt / unknown でも録音開始から許可を求められます。";
+  }
+
+  async function ensureAudioContext() {
+    if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioContext.state === "suspended") await audioContext.resume();
+    $("audioContextState").textContent = audioContext.state;
+    return audioContext;
+  }
+
+  async function requestMicrophone(stopImmediately) {
+    await ensureAudioContext();
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: false }
+    });
+    if (stopImmediately) stream.getTracks().forEach(track => track.stop());
+    permissionStatus = null;
+    await refreshEnvironment();
+    return stream;
+  }
+
+  function exportPage() {
+    try {
+      const clone = document.documentElement.cloneNode(true);
+      clone.querySelector("#sandboxModal").removeAttribute("open");
+      for (const audio of clone.querySelectorAll("audio")) audio.removeAttribute("src");
+      const download = clone.querySelector("#downloadWav");
+      download.removeAttribute("href");
+      download.setAttribute("aria-disabled", "true");
+      const blob = new Blob(["<!doctype html>\n", clone.outerHTML], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "index.html";
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      showToast("index.html を保存しました。HTTPS または localhost で開いてください。", "ok");
+    } catch (error) {
+      console.error(error);
+      showToast("index.html の保存に失敗しました。", "danger");
+    }
+  }
+
+  function stopRecording() {
+    clearTimeout(recordTimeout);
+    cancelAnimationFrame(recordAnimation);
+    if (recorder?.state === "recording") recorder.stop();
+    recordStream?.getTracks().forEach(track => track.stop());
+    recordStream = null;
+    $("stop").disabled = true;
+    refreshEnvironment();
+  }
+
+  function updateRecordTimer() {
+    const elapsed = Math.min(MAX_SECONDS, (performance.now() - recordStartedAt) / 1000);
+    $("timer").textContent = `${elapsed.toFixed(1)}秒`;
+    if (recorder?.state === "recording") recordAnimation = requestAnimationFrame(updateRecordTimer);
+  }
+
+  async function startRecording() {
+    try {
+      setWorkState("マイク確認中");
+      recordStream = await requestMicrophone(false);
+      recordChunks = [];
+      recorder = new MediaRecorder(recordStream, selectedMime ? { mimeType: selectedMime } : undefined);
+      recorder.ondataavailable = event => { if (event.data?.size) recordChunks.push(event.data); };
+      recorder.onerror = event => showToast(`録音エラー: ${event.error?.message || "不明"}`, "danger");
+      recorder.onstop = async () => {
+        const blob = new Blob(recordChunks, { type: recorder.mimeType || selectedMime || "audio/webm" });
+        if (!blob.size) return showToast("録音データが空でした。", "danger");
+        setAudioUrl("input", blob);
+        await decodeAndAnalyse(await blob.arrayBuffer());
+      };
+      recorder.start(250);
+      recordStartedAt = performance.now();
+      $("timer").textContent = "0.0秒";
+      $("record").disabled = true;
+      $("stop").disabled = false;
+      setWorkState("録音中");
+      updateRecordTimer();
+      recordTimeout = setTimeout(stopRecording, MAX_SECONDS * 1000);
+    } catch (error) {
+      console.error(error);
+      recordStream?.getTracks().forEach(track => track.stop());
+      setWorkState("録音不可");
+      const message = error.name === "NotAllowedError"
+        ? "マイクが許可されませんでした。サイト設定を確認するか、ファイル入力を使ってください。"
+        : `録音を開始できません: ${error.message || error.name}`;
+      showToast(message, "danger");
+      await refreshEnvironment();
+    }
+  }
+
+  function setAudioUrl(which, blob) {
+    const isInput = which === "input";
+    const oldUrl = isInput ? inputObjectUrl : outputObjectUrl;
+    if (oldUrl) URL.revokeObjectURL(oldUrl);
+    const url = URL.createObjectURL(blob);
+    if (isInput) {
+      inputObjectUrl = url;
+      $("inputAudio").src = url;
+    } else {
+      outputObjectUrl = url;
+      $("outputAudio").src = url;
+      $("downloadWav").href = url;
+      $("downloadWav").setAttribute("aria-disabled", "false");
+    }
+  }
+
+  async function decodeAndAnalyse(arrayBuffer) {
+    try {
+      setWorkState("デコード中");
+      const context = await ensureAudioContext();
+      const buffer = await context.decodeAudioData(arrayBuffer.slice(0));
+      const frames = Math.min(buffer.length, Math.floor(buffer.sampleRate * MAX_SECONDS));
+      inputSignal = new Float32Array(frames);
+      for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+        const data = buffer.getChannelData(channel);
+        for (let i = 0; i < frames; i++) inputSignal[i] += data[i] / buffer.numberOfChannels;
+      }
+      inputSampleRate = buffer.sampleRate;
+      if (buffer.duration > MAX_SECONDS + .01) showToast("先頭10秒だけを解析します。", "warning");
+      setWorkState("解析中");
+      await new Promise(resolve => setTimeout(resolve));
+      inputFeatures = analyseSignal(inputSignal, inputSampleRate);
+      renderAnalysis(inputFeatures);
+      setWorkState("変換準備完了");
+      $("sourceProfile").disabled = false;
+      $("convert").disabled = !$("sourceProfile").value;
+      updateRecommendation(true);
+    } catch (error) {
+      console.error(error);
+      setWorkState("デコード失敗");
+      showToast("音声をデコードできません。別のWAV / MP3 / M4A / WebMを試してください。", "danger");
+    }
+  }
+
+  function renderAnalysis(features) {
+    const hz = value => Number.isFinite(value) ? `${value.toFixed(0)} Hz` : "—";
+    $("f0Result").textContent = features.f0 ? `${features.f0.toFixed(1)} / ${features.f0Iqr.toFixed(1)} Hz` : "有声区間なし";
+    $("formantResult").textContent = features.formants.map(hz).join(" / ");
+    $("vtlResult").textContent = features.vtl ? `${features.vtl.toFixed(1)} cm` : "—";
+    $("auxResult").textContent = `${features.zcr.toFixed(3)} / ${features.centroid.toFixed(0)} Hz`;
+    $("classResult").textContent = features.classification.profile ? PROFILES[features.classification.profile].label : "不確定";
+    $("confidenceResult").textContent = `(${Math.round(features.classification.confidence * 100)}%、有声率 ${Math.round(features.voicedRatio * 100)}%)`;
+    $("confidenceBar").value = features.classification.confidence;
+    const confident = features.classification.confidence >= .66;
+    $("sourceProfile").value = confident ? features.classification.profile : "";
+    $("manualHelp").hidden = confident;
+    $("evalF0In").textContent = hz(features.f0);
+    ["F1", "F2", "F3"].forEach((name, index) => { $(`eval${name}In`).textContent = hz(features.formants[index]); });
+  }
+
+  function analyseSignal(signal, sampleRate) {
+    const downsampled = resampleToRate(signal, sampleRate, ANALYSIS_RATE);
+    const pitch = estimateF0Yin(downsampled, ANALYSIS_RATE);
+    const f0Values = pitch.frames.filter(frame => frame.f0 > 0).map(frame => frame.f0);
+    const formants = estimateFormants(downsampled, ANALYSIS_RATE, pitch.frames);
+    const f0 = median(f0Values);
+    const f0Iqr = quantile(f0Values, .75) - quantile(f0Values, .25);
+    const validFormants = formants.every(Number.isFinite);
+    const spacing = validFormants ? (formants[2] - formants[0]) / 2 : 0;
+    const vtl = spacing > 0 ? 35000 / (2 * spacing) : 0;
+    const zcr = mean(pitch.frames.filter(frame => frame.energy > pitch.energyFloor).map(frame => frame.zcr));
+    const centroid = spectralCentroid(downsampled, ANALYSIS_RATE, pitch.frames);
+    const voicedRatio = pitch.frames.length ? f0Values.length / pitch.frames.length : 0;
+    return {
+      f0, f0Iqr: Number.isFinite(f0Iqr) ? f0Iqr : 0, formants, vtl,
+      zcr: Number.isFinite(zcr) ? zcr : 0,
+      centroid: Number.isFinite(centroid) ? centroid : 0,
+      voicedRatio,
+      classification: classifyAcousticProfile(f0, vtl, voicedRatio, validFormants)
+    };
+  }
+
+  function classifyAcousticProfile(f0, vtl, voicedRatio, hasFormants) {
+    if (!f0 || voicedRatio < .08) return { profile: "", confidence: .2 };
+    let profile = f0 > 240 ? "child" : f0 < 160 ? "adult_m" : "adult_f";
+    const f0Margin = profile === "child" ? (f0 - 240) / 80
+      : profile === "adult_m" ? (160 - f0) / 80
+      : Math.min(f0 - 160, 240 - f0) / 80;
+    let agreement = 0;
+    if (hasFormants && vtl) {
+      const vtlProfile = vtl < 14.7 ? "child" : vtl > 16.6 ? "adult_m" : "adult_f";
+      agreement = vtlProfile === profile ? .12 : -.23;
+      if (vtlProfile !== profile && (Math.abs(f0 - 160) < 20 || Math.abs(f0 - 240) < 20)) profile = vtlProfile;
+    }
+    const confidence = clamp(.53 + clamp(f0Margin, 0, 1) * .28 + agreement + Math.min(.1, voicedRatio * .2) - (hasFormants ? 0 : .12), .2, .93);
+    return { profile, confidence };
+  }
+
+  function estimateF0Yin(signal, sampleRate) {
+    const frameSize = Math.round(sampleRate * .04);
+    const hop = Math.round(sampleRate * .01);
+    const minTau = Math.floor(sampleRate / 500);
+    const maxTau = Math.ceil(sampleRate / 65);
+    let globalEnergy = 0;
+    for (const sample of signal) globalEnergy += sample * sample;
+    const globalRms = Math.sqrt(globalEnergy / Math.max(1, signal.length));
+    const energyFloor = Math.max(.0025, globalRms * .12);
+    const frames = [];
+    for (let start = 0; start + frameSize <= signal.length; start += hop) {
+      let meanValue = 0;
+      for (let i = 0; i < frameSize; i++) meanValue += signal[start + i];
+      meanValue /= frameSize;
+      const frame = new Float32Array(frameSize);
+      let energy = 0;
+      let crossings = 0;
+      for (let i = 0; i < frameSize; i++) {
+        const value = signal[start + i] - meanValue;
+        frame[i] = value;
+        energy += value * value;
+        if (i && (value >= 0) !== (frame[i - 1] >= 0)) crossings++;
+      }
+      const rms = Math.sqrt(energy / frameSize);
+      const zcr = crossings / (frameSize - 1);
+      const result = rms >= energyFloor ? yinFrame(frame, sampleRate, minTau, maxTau) : { f0: 0, probability: 0 };
+      frames.push({ start, f0: result.f0, probability: result.probability, energy: rms, zcr });
+    }
+    return { frames, energyFloor };
+  }
+
+  function yinFrame(frame, sampleRate, minTau, maxTau) {
+    const difference = new Float64Array(maxTau + 1);
+    const limit = frame.length - maxTau;
+    for (let tau = 1; tau <= maxTau; tau++) {
+      let sum = 0;
+      for (let i = 0; i < limit; i++) {
+        const delta = frame[i] - frame[i + tau];
+        sum += delta * delta;
+      }
+      difference[tau] = sum;
+    }
+    const cmndf = new Float64Array(maxTau + 1);
+    cmndf[0] = 1;
+    let running = 0;
+    let bestTau = 0;
+    let bestValue = Infinity;
+    for (let tau = 1; tau <= maxTau; tau++) {
+      running += difference[tau];
+      cmndf[tau] = running ? difference[tau] * tau / running : 1;
+      if (tau >= minTau && cmndf[tau] < bestValue) {
+        bestValue = cmndf[tau];
+        bestTau = tau;
+      }
+      if (tau >= minTau && cmndf[tau] < .15) {
+        while (tau + 1 <= maxTau && cmndf[tau + 1] < cmndf[tau]) tau++;
+        bestTau = tau;
+        bestValue = cmndf[tau];
+        break;
+      }
+    }
+    if (!bestTau || bestValue > .32) return { f0: 0, probability: 0 };
+    const left = cmndf[Math.max(minTau, bestTau - 1)];
+    const centre = cmndf[bestTau];
+    const right = cmndf[Math.min(maxTau, bestTau + 1)];
+    const denominator = 2 * (2 * centre - left - right);
+    const refined = denominator ? bestTau + (right - left) / denominator : bestTau;
+    return { f0: sampleRate / refined, probability: 1 - bestValue };
+  }
+
+  function estimateFormants(signal, sampleRate, pitchFrames) {
+    const candidates = pitchFrames.filter(frame => frame.f0 > 0 && frame.probability > .65)
+      .sort((a, b) => b.energy - a.energy).slice(0, 48);
+    const tracks = [[], [], []];
+    const frameLength = Math.round(sampleRate * .03);
+    const order = 14;
+    for (const candidate of candidates) {
+      const start = clamp(candidate.start, 0, signal.length - frameLength);
+      const frame = new Float64Array(frameLength);
+      for (let i = 0; i < frameLength; i++) {
+        const current = signal[start + i];
+        const previous = i ? signal[start + i - 1] : 0;
+        frame[i] = (current - .97 * previous) * (.54 - .46 * Math.cos(2 * Math.PI * i / (frameLength - 1)));
+      }
+      const lpc = levinsonDurbin(frame, order);
+      if (!lpc) continue;
+      const envelope = [];
+      for (let frequency = 150; frequency <= 4500; frequency += 10) {
+        const omega = 2 * Math.PI * frequency / sampleRate;
+        let real = 1;
+        let imag = 0;
+        for (let k = 1; k < lpc.length; k++) {
+          real += lpc[k] * Math.cos(omega * k);
+          imag -= lpc[k] * Math.sin(omega * k);
+        }
+        envelope.push({ frequency, value: -Math.log(real * real + imag * imag + 1e-12) });
+      }
+      const peaks = [];
+      for (let i = 1; i < envelope.length - 1; i++) {
+        if (envelope[i].value > envelope[i - 1].value && envelope[i].value >= envelope[i + 1].value) peaks.push(envelope[i]);
+      }
+      peaks.sort((a, b) => a.frequency - b.frequency);
+      const f1 = peaks.find(peak => peak.frequency >= 200 && peak.frequency <= 1100);
+      const f2 = f1 && peaks.find(peak => peak.frequency >= Math.max(700, f1.frequency + 250) && peak.frequency <= 3000);
+      const f3 = f2 && peaks.find(peak => peak.frequency >= Math.max(1600, f2.frequency + 300) && peak.frequency <= 4500);
+      if (f1 && f2 && f3) {
+        tracks[0].push(f1.frequency);
+        tracks[1].push(f2.frequency);
+        tracks[2].push(f3.frequency);
+      }
+    }
+    return tracks.map(values => values.length >= 4 ? median(values) : NaN);
+  }
+
+  function levinsonDurbin(frame, order) {
+    const autocorrelation = new Float64Array(order + 1);
+    for (let lag = 0; lag <= order; lag++) {
+      let sum = 0;
+      for (let i = lag; i < frame.length; i++) sum += frame[i] * frame[i - lag];
+      autocorrelation[lag] = sum;
+    }
+    if (autocorrelation[0] < 1e-9) return null;
+    let coefficients = new Float64Array(order + 1);
+    coefficients[0] = 1;
+    let error = autocorrelation[0];
+    for (let i = 1; i <= order; i++) {
+      let sum = autocorrelation[i];
+      for (let j = 1; j < i; j++) sum += coefficients[j] * autocorrelation[i - j];
+      const reflection = -sum / error;
+      if (!Number.isFinite(reflection) || Math.abs(reflection) >= .999) return null;
+      const previous = coefficients.slice();
+      coefficients[i] = reflection;
+      for (let j = 1; j < i; j++) coefficients[j] = previous[j] + reflection * previous[i - j];
+      error *= 1 - reflection * reflection;
+      if (error <= 1e-12) return null;
+    }
+    return coefficients;
+  }
+
+  function spectralCentroid(signal, sampleRate, pitchFrames) {
+    const usable = pitchFrames.filter(frame => frame.energy > 0).sort((a, b) => b.energy - a.energy).slice(0, 16);
+    if (!usable.length) return 0;
+    const size = 1024;
+    let weighted = 0;
+    let total = 0;
+    for (const candidate of usable) {
+      const real = new Float64Array(size);
+      const imag = new Float64Array(size);
+      for (let i = 0; i < size && candidate.start + i < signal.length; i++) {
+        real[i] = signal[candidate.start + i] * (.5 - .5 * Math.cos(2 * Math.PI * i / (size - 1)));
+      }
+      fft(real, imag, false);
+      for (let bin = 1; bin < size / 2; bin++) {
+        const magnitude = Math.hypot(real[bin], imag[bin]);
+        weighted += magnitude * bin * sampleRate / size;
+        total += magnitude;
+      }
+    }
+    return total ? weighted / total : 0;
+  }
+
+  function resampleToRate(signal, fromRate, toRate) {
+    if (fromRate === toRate) return signal.slice();
+    return resampleToLength(signal, Math.max(1, Math.round(signal.length * toRate / fromRate)));
+  }
+
+  function resampleToLength(signal, outputLength) {
+    if (outputLength === signal.length) return signal.slice();
+    const output = new Float32Array(outputLength);
+    const scale = (signal.length - 1) / Math.max(1, outputLength - 1);
+    for (let i = 0; i < outputLength; i++) {
+      const position = i * scale;
+      const left = Math.floor(position);
+      const fraction = position - left;
+      output[i] = signal[left] * (1 - fraction) + signal[Math.min(signal.length - 1, left + 1)] * fraction;
+    }
+    return output;
+  }
+
+  function median(values) {
+    if (!values.length) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const middle = sorted.length >> 1;
+    return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+  }
+
+  function quantile(values, q) {
+    if (!values.length) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const position = (sorted.length - 1) * q;
+    const base = Math.floor(position);
+    const fraction = position - base;
+    return sorted[base] + (sorted[Math.min(sorted.length - 1, base + 1)] - sorted[base]) * fraction;
+  }
+
+  function mean(values) { return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0; }
+
+  function updateRecommendation(resetFormant = false) {
+    const source = PROFILES[$("sourceProfile").value];
+    const target = PROFILES[$("targetProfile").value];
+    $("semitoneValue").textContent = Number($("semitone").value).toFixed(1);
+    if (!source || !target) {
+      $("recommendation").textContent = "入力プロファイルを選ぶと相対変換量を計算します。";
+      $("convert").disabled = true;
+      return;
+    }
+    const baseFormant = clamp(source.vtl / target.vtl, .8, 1.4);
+    if (resetFormant) $("formantRatio").value = baseFormant.toFixed(2);
+    const pitchRatio = target.f0 / source.f0 * 2 ** (Number($("semitone").value) / 12);
+    $("formantValue").textContent = Number($("formantRatio").value).toFixed(2);
+    const expectedF0 = inputFeatures?.f0 ? inputFeatures.f0 * pitchRatio : target.f0;
+    $("recommendation").textContent = `推奨: ピッチ×${pitchRatio.toFixed(2)}（予測中央値 ${expectedF0.toFixed(0)} Hz）、フォルマント×${baseFormant.toFixed(2)}。スライダーでフォルマントだけ変更できます。`;
+    $("convert").disabled = !inputSignal;
+  }
+
+  async function convertSignal() {
+    const source = PROFILES[$("sourceProfile").value];
+    const target = PROFILES[$("targetProfile").value];
+    if (!inputSignal || !source || !target) return;
+    $("convert").disabled = true;
+    setWorkState("変換中");
+    const started = performance.now();
+    try {
+      await new Promise(resolve => setTimeout(resolve));
+      const pitchRatio = clamp(target.f0 / source.f0 * 2 ** (Number($("semitone").value) / 12), .42, 2.7);
+      const formantRatio = Number($("formantRatio").value);
+      let pitched;
+      if (Math.abs(pitchRatio - 1) < .002) {
+        pitched = inputSignal.slice();
+      } else {
+        const resampled = resampleToLength(inputSignal, Math.max(64, Math.round(inputSignal.length / pitchRatio)));
+        pitched = wsola(resampled, inputSampleRate, pitchRatio, inputSignal.length);
+      }
+      const correction = formantRatio / pitchRatio;
+      const warped = Math.abs(correction - 1) < .01 ? pitched : warpSpectralEnvelope(pitched, inputSampleRate, correction);
+      const peak = warped.reduce((maximum, value) => Math.max(maximum, Math.abs(value)), 0) || 1;
+      const gainValue = Math.min(1, .94 / peak);
+      const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      const offline = new Offline(1, inputSignal.length, inputSampleRate);
+      const buffer = offline.createBuffer(1, inputSignal.length, inputSampleRate);
+      buffer.copyToChannel(warped.subarray(0, inputSignal.length), 0);
+      const sourceNode = offline.createBufferSource();
+      const highpass = offline.createBiquadFilter();
+      const gain = offline.createGain();
+      sourceNode.buffer = buffer;
+      highpass.type = "highpass";
+      highpass.frequency.value = 35;
+      highpass.Q.value = .7;
+      gain.gain.value = gainValue;
+      sourceNode.connect(highpass).connect(gain).connect(offline.destination);
+      sourceNode.start();
+      const rendered = await offline.startRendering();
+      const elapsed = performance.now() - started;
+      const output = rendered.getChannelData(0).slice();
+      setAudioUrl("output", new Blob([encodeWav(output, rendered.sampleRate)], { type: "audio/wav" }));
+      $("evalLatency").textContent = `${elapsed.toFixed(0)} ms（10秒換算 ${(elapsed * MAX_SECONDS / (inputSignal.length / inputSampleRate)).toFixed(0)} ms、端末依存）`;
+      setWorkState("出力解析中");
+      await new Promise(resolve => setTimeout(resolve));
+      renderOutputEvaluation(analyseSignal(output, rendered.sampleRate));
+      setWorkState("完了");
+      showToast("変換が完了しました。", "ok");
+    } catch (error) {
+      console.error(error);
+      setWorkState("変換失敗");
+      showToast(`変換に失敗しました: ${error.message || error.name}`, "danger");
+    } finally {
+      $("convert").disabled = !inputSignal || !$("sourceProfile").value;
+    }
+  }
+
+  function wsola(input, sampleRate, stretch, targetLength) {
+    if (input.length < 128) return resampleToLength(input, targetLength);
+    let frameSize = Math.round(sampleRate * .04);
+    frameSize += frameSize % 2;
+    frameSize = Math.min(frameSize, input.length);
+    const overlap = frameSize >> 1;
+    const synthesisHop = overlap;
+    const analysisHop = synthesisHop / stretch;
+    const searchRadius = Math.round(sampleRate * .008);
+    const step = Math.max(1, Math.round(sampleRate / 12000));
+    const output = new Float32Array(targetLength + frameSize);
+    const weights = new Float32Array(output.length);
+    const window = new Float32Array(frameSize);
+    for (let i = 0; i < frameSize; i++) window[i] = .5 - .5 * Math.cos(2 * Math.PI * i / (frameSize - 1));
+    let previousInput = 0;
+    addFrame(0, 0);
+    for (let outputPosition = synthesisHop; outputPosition < targetLength; outputPosition += synthesisHop) {
+      const predicted = previousInput + analysisHop;
+      const minimum = clamp(Math.round(predicted - searchRadius), 0, Math.max(0, input.length - frameSize));
+      const maximum = clamp(Math.round(predicted + searchRadius), minimum, Math.max(minimum, input.length - frameSize));
+      let bestPosition = minimum;
+      let bestScore = -Infinity;
+      for (let candidate = minimum; candidate <= maximum; candidate += step) {
+        let cross = 0;
+        let energyA = 1e-12;
+        let energyB = 1e-12;
+        for (let i = 0; i < overlap; i += step) {
+          const existing = weights[outputPosition + i] ? output[outputPosition + i] / weights[outputPosition + i] : 0;
+          const incoming = input[candidate + i] || 0;
+          cross += existing * incoming;
+          energyA += existing * existing;
+          energyB += incoming * incoming;
+        }
+        const score = cross / Math.sqrt(energyA * energyB);
+        if (score > bestScore) { bestScore = score; bestPosition = candidate; }
+      }
+      addFrame(bestPosition, outputPosition);
+      previousInput = bestPosition;
+    }
+    const result = new Float32Array(targetLength);
+    for (let i = 0; i < targetLength; i++) result[i] = weights[i] ? output[i] / weights[i] : 0;
+    return result;
+
+    function addFrame(inputPosition, outputPosition) {
+      for (let i = 0; i < frameSize && outputPosition + i < output.length; i++) {
+        const weight = window[i];
+        output[outputPosition + i] += (input[inputPosition + i] || 0) * weight;
+        weights[outputPosition + i] += weight;
+      }
+    }
+  }
+
+  function warpSpectralEnvelope(signal, sampleRate, ratio) {
+    const size = sampleRate > 24000 ? 2048 : 1024;
+    const hop = size >> 2;
+    const half = size >> 1;
+    const radius = Math.max(3, Math.round(220 / (sampleRate / size)));
+    const window = new Float64Array(size);
+    for (let i = 0; i < size; i++) window[i] = .5 - .5 * Math.cos(2 * Math.PI * i / (size - 1));
+    const output = new Float64Array(signal.length + size);
+    const weights = new Float64Array(output.length);
+    for (let position = -size / 2; position < signal.length; position += hop) {
+      const real = new Float64Array(size);
+      const imag = new Float64Array(size);
+      for (let i = 0; i < size; i++) {
+        const sourceIndex = position + i;
+        if (sourceIndex >= 0 && sourceIndex < signal.length) real[i] = signal[sourceIndex] * window[i];
+      }
+      fft(real, imag, false);
+      const logMagnitude = new Float64Array(half + 1);
+      const prefix = new Float64Array(half + 2);
+      for (let bin = 0; bin <= half; bin++) {
+        logMagnitude[bin] = Math.log(Math.hypot(real[bin], imag[bin]) + 1e-9);
+        prefix[bin + 1] = prefix[bin] + logMagnitude[bin];
+      }
+      const envelope = new Float64Array(half + 1);
+      for (let bin = 0; bin <= half; bin++) {
+        const left = Math.max(0, bin - radius);
+        const right = Math.min(half, bin + radius);
+        envelope[bin] = (prefix[right + 1] - prefix[left]) / (right - left + 1);
+      }
+      for (let bin = 0; bin <= half; bin++) {
+        const sourceBin = clamp(bin / ratio, 0, half);
+        const low = Math.floor(sourceBin);
+        const fraction = sourceBin - low;
+        const desired = envelope[low] * (1 - fraction) + envelope[Math.min(half, low + 1)] * fraction;
+        const gain = Math.exp(clamp(desired - envelope[bin], -Math.log(4), Math.log(4)));
+        real[bin] *= gain;
+        imag[bin] *= gain;
+        if (bin > 0 && bin < half) {
+          real[size - bin] *= gain;
+          imag[size - bin] *= gain;
+        }
+      }
+      fft(real, imag, true);
+      for (let i = 0; i < size; i++) {
+        const outputIndex = position + i;
+        if (outputIndex < 0 || outputIndex >= output.length) continue;
+        const weight = window[i] * window[i];
+        output[outputIndex] += real[i] * window[i];
+        weights[outputIndex] += weight;
+      }
+    }
+    const result = new Float32Array(signal.length);
+    for (let i = 0; i < signal.length; i++) result[i] = weights[i] ? output[i] / weights[i] : signal[i];
+    return result;
+  }
+
+  function fft(real, imag, inverse) {
+    const length = real.length;
+    for (let i = 1, j = 0; i < length; i++) {
+      let bit = length >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) {
+        [real[i], real[j]] = [real[j], real[i]];
+        [imag[i], imag[j]] = [imag[j], imag[i]];
+      }
+    }
+    for (let span = 2; span <= length; span <<= 1) {
+      const angle = (inverse ? 2 : -2) * Math.PI / span;
+      const rootReal = Math.cos(angle);
+      const rootImag = Math.sin(angle);
+      for (let start = 0; start < length; start += span) {
+        let twiddleReal = 1;
+        let twiddleImag = 0;
+        for (let offset = 0; offset < span / 2; offset++) {
+          const even = start + offset;
+          const odd = even + span / 2;
+          const oddReal = real[odd] * twiddleReal - imag[odd] * twiddleImag;
+          const oddImag = real[odd] * twiddleImag + imag[odd] * twiddleReal;
+          real[odd] = real[even] - oddReal;
+          imag[odd] = imag[even] - oddImag;
+          real[even] += oddReal;
+          imag[even] += oddImag;
+          const nextReal = twiddleReal * rootReal - twiddleImag * rootImag;
+          twiddleImag = twiddleReal * rootImag + twiddleImag * rootReal;
+          twiddleReal = nextReal;
+        }
+      }
+    }
+    if (inverse) for (let i = 0; i < length; i++) { real[i] /= length; imag[i] /= length; }
+  }
+
+  function encodeWav(signal, sampleRate) {
+    const buffer = new ArrayBuffer(44 + signal.length * 2);
+    const view = new DataView(buffer);
+    const text = (offset, value) => { for (let i = 0; i < value.length; i++) view.setUint8(offset + i, value.charCodeAt(i)); };
+    text(0, "RIFF");
+    view.setUint32(4, 36 + signal.length * 2, true);
+    text(8, "WAVE");
+    text(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    text(36, "data");
+    view.setUint32(40, signal.length * 2, true);
+    for (let i = 0; i < signal.length; i++) {
+      const sample = clamp(signal[i], -1, 1);
+      view.setInt16(44 + i * 2, sample < 0 ? sample * 32768 : sample * 32767, true);
+    }
+    return buffer;
+  }
+
+  function renderOutputEvaluation(features) {
+    const hz = value => Number.isFinite(value) && value ? `${value.toFixed(0)} Hz` : "—";
+    const ratio = (after, before) => Number.isFinite(after) && Number.isFinite(before) && before ? (after / before).toFixed(2) : "—";
+    $("evalF0Out").textContent = hz(features.f0);
+    $("evalF0Ratio").textContent = ratio(features.f0, inputFeatures.f0);
+    ["F1", "F2", "F3"].forEach((name, index) => {
+      $(`eval${name}Out`).textContent = hz(features.formants[index]);
+      $(`eval${name}Ratio`).textContent = ratio(features.formants[index], inputFeatures.formants[index]);
+    });
+  }
+
+  async function runSelfTests() {
+    const results = [];
+    const check = (name, condition, detail = "") => results.push({ name, condition: !!condition, detail });
+    try {
+      const sampleRate = 12000;
+      const sine = new Float32Array(sampleRate);
+      for (let i = 0; i < sine.length; i++) sine[i] = .5 * Math.sin(2 * Math.PI * 120 * i / sampleRate);
+      const yin = estimateF0Yin(sine, sampleRate).frames.map(frame => frame.f0).filter(Boolean);
+      const detected = median(yin);
+      check("YINが120 Hzを検出", Math.abs(detected - 120) < 2, `${detected.toFixed(2)} Hz`);
+
+      const real = Float64Array.from([1, .5, -.25, .1, 0, 0, 0, 0]);
+      const original = real.slice();
+      const imag = new Float64Array(real.length);
+      fft(real, imag, false);
+      fft(real, imag, true);
+      const fftError = Math.max(...real.map((value, index) => Math.abs(value - original[index])));
+      check("FFT往復誤差", fftError < 1e-9, fftError.toExponential(2));
+
+      const shifted = wsola(resampleToLength(sine, Math.round(sine.length / 1.5)), sampleRate, 1.5, sine.length);
+      check("WSOLAが長さを維持", shifted.length === sine.length && shifted.every(Number.isFinite), `${shifted.length} samples`);
+
+      const warped = warpSpectralEnvelope(sine.subarray(0, 4096), sampleRate, 1.1);
+      check("包絡ワープが有限値を出力", warped.length === 4096 && warped.every(Number.isFinite));
+
+      const wav = new Uint8Array(encodeWav(sine.subarray(0, 100), sampleRate));
+      check("16-bit PCM WAVヘッダ", String.fromCharCode(...wav.subarray(0, 4)) === "RIFF" && String.fromCharCode(...wav.subarray(8, 12)) === "WAVE");
+    } catch (error) {
+      console.error(error);
+      check("自己テスト実行", false, error.message);
+    }
+    $("testResults").replaceChildren(...results.map(result => {
+      const item = document.createElement("li");
+      item.className = result.condition ? "test-pass" : "test-fail";
+      item.textContent = `${result.name}${result.detail ? ` — ${result.detail}` : ""}`;
+      return item;
+    }));
+    const passed = results.filter(result => result.condition).length;
+    $("testSummary").textContent = `${passed}/${results.length} 合格`;
+    $("testSummary").className = passed === results.length ? "ok" : "danger";
+    return passed === results.length;
+  }
+
+  $("enableMic").addEventListener("click", async () => {
+    try {
+      await requestMicrophone(true);
+      showToast("マイクを利用できます。", "ok");
+    } catch (error) {
+      console.error(error);
+      showToast("マイクを有効化できません。ブラウザの権限設定を確認してください。", "danger");
+      await refreshEnvironment();
+    }
+  });
+  $("record").addEventListener("click", startRecording);
+  $("stop").addEventListener("click", stopRecording);
+  $("saveHtml").addEventListener("click", exportPage);
+  $("modalSave").addEventListener("click", exportPage);
+  $("modalClose").addEventListener("click", () => $("sandboxModal").close());
+  $("fileInput").addEventListener("change", async event => {
+    const file = event.target.files[0];
+    if (!file) return;
+    setAudioUrl("input", file);
+    await decodeAndAnalyse(await file.arrayBuffer());
+  });
+  $("sourceProfile").addEventListener("change", () => updateRecommendation(true));
+  $("targetProfile").addEventListener("change", () => updateRecommendation(true));
+  $("semitone").addEventListener("input", () => updateRecommendation(false));
+  $("formantRatio").addEventListener("input", () => updateRecommendation(false));
+  $("convert").addEventListener("click", convertSignal);
+  $("runTests").addEventListener("click", runSelfTests);
+  $("downloadWav").addEventListener("click", event => {
+    if (!outputObjectUrl) { event.preventDefault(); showToast("先に音声を変換してください。", "warning"); }
+  });
+
+  window.__voiceTransition = Object.freeze({ runSelfTests, analyseSignal, wsola, warpSpectralEnvelope });
+
+  (async function initialise() {
+    await refreshEnvironment();
+    if (isSandboxedForMicrophone()) $("sandboxModal").showModal();
+  })();
+  </script>
+</body>
+</html>
