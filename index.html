@@ -212,7 +212,7 @@
           </select>
         </label>
         <label>ピッチ微調整 <span><output id="semitoneValue">0.0</output> 半音</span>
-          <input id="semitone" type="range" min="-4" max="4" step="0.1" value="0">
+          <input id="semitone" type="range" min="-18" max="18" step="0.1" value="0">
         </label>
         <label>最終フォルマント比 <output id="formantValue">1.00</output>
           <input id="formantRatio" type="range" min="0.8" max="1.4" step="0.01" value="1">
@@ -221,10 +221,13 @@
       <p id="recommendation" class="muted">入力解析後に相対変換量を計算します。</p>
       <div class="row">
         <button id="convert" type="button" class="primary" disabled>変換する</button>
-        <a id="downloadWav" class="pill" download="voice-transition.wav" aria-disabled="true">WAVを保存</a>
+        <a id="downloadOriginal" class="pill" download="voice-original.wav" aria-disabled="true">原音 WAV</a>
+        <a id="downloadOld" class="pill" download="voice-old.wav" aria-disabled="true">旧方式 WAV</a>
+        <a id="downloadWav" class="pill" download="voice-new.wav" aria-disabled="true">新方式 WAV</a>
       </div>
-      <audio id="outputAudio" controls aria-label="変換後の音声"></audio>
-      <p class="muted">処理順: 相対F0比でリサンプル → WSOLAで元の長さへ復元 → スペクトル包絡を相対VTL比へワープ → OfflineAudioContextでレンダリング。</p>
+      <p>旧方式</p><audio id="oldAudio" controls aria-label="旧方式の音声"></audio>
+      <p>新方式</p><audio id="outputAudio" controls aria-label="新方式の音声"></audio>
+      <p class="muted">原音は解析・変換と同じ先頭10秒のモノラルです。旧方式と新方式は同じ原音から作成します。新方式は無声と判定した区間を原音に近づけます。判定の誤りや音質変化は聴いて確認してください。</p>
     </section>
 
     <section class="card" aria-labelledby="evaluationTitle">
@@ -274,7 +277,7 @@
         <li><a href="https://pubmed.ncbi.nlm.nih.gov/27062936/">Markova et al. (2016)</a>: 思春期の声帯・声道形態、F0、フォルマント位置の変化。</li>
         <li><a href="https://pubmed.ncbi.nlm.nih.gov/10089598/">Lee et al. (1999)</a>: 5–17歳と成人のF0・フォルマント・時間特性。</li>
         <li><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC5966313/">Story et al. (2018)</a>: 年齢・性別依存の声道モデル。成人平均VTLは男性17.6 cm、女性15.6 cm。</li>
-        <li><a href="https://www.isca-archive.org/interspeech_2023/zhao23c_interspeech.html">Zhao et al. (2023)</a>: WORLDによるadult→child変換。F0 240–300 Hz、男性側スペクトルワープ1.2–1.4。</li>
+        <li><a href="https://www.isca-archive.org/interspeech_2023/zhao23c_interspeech.html">Zhao et al. (2023)</a>: 音声認識向けの成人・子ども音声の特徴変換。自然さの聴取評価ではありません。</li>
         <li><a href="https://doi.org/10.1121/1.1458024">de Cheveigné &amp; Kawahara (2002)</a>: YIN F0推定。</li>
         <li><a href="https://arxiv.org/abs/2407.07235">Netzorg et al. (2024)</a>: 声の性別を固定カテゴリで扱う限界と、pitch / resonance / weightの分離。</li>
       </ul>
@@ -343,6 +346,8 @@
   let inputFeatures = null;
   let inputObjectUrl = "";
   let outputObjectUrl = "";
+  let oldObjectUrl = "";
+  let generation = 0;
   let toastTimer = 0;
 
   function showToast(message, kind = "") {
@@ -436,9 +441,11 @@
       const clone = document.documentElement.cloneNode(true);
       clone.querySelector("#sandboxModal").removeAttribute("open");
       for (const audio of clone.querySelectorAll("audio")) audio.removeAttribute("src");
-      const download = clone.querySelector("#downloadWav");
-      download.removeAttribute("href");
-      download.setAttribute("aria-disabled", "true");
+      for (const id of ["downloadOriginal", "downloadOld", "downloadWav"]) {
+        const download = clone.querySelector(`#${id}`);
+        download.removeAttribute("href");
+        download.setAttribute("aria-disabled", "true");
+      }
       const blob = new Blob(["<!doctype html>\n", clone.outerHTML], { type: "text/html;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -480,8 +487,8 @@
       recorder.onstop = async () => {
         const blob = new Blob(recordChunks, { type: recorder.mimeType || selectedMime || "audio/webm" });
         if (!blob.size) return showToast("録音データが空でした。", "danger");
-        setAudioUrl("input", blob);
-        await decodeAndAnalyse(await blob.arrayBuffer());
+        const token = clearInput();
+        await decodeAndAnalyse(await blob.arrayBuffer(), token);
       };
       recorder.start(250);
       recordStartedAt = performance.now();
@@ -505,12 +512,19 @@
 
   function setAudioUrl(which, blob) {
     const isInput = which === "input";
-    const oldUrl = isInput ? inputObjectUrl : outputObjectUrl;
+    const oldUrl = isInput ? inputObjectUrl : which === "old" ? oldObjectUrl : outputObjectUrl;
     if (oldUrl) URL.revokeObjectURL(oldUrl);
     const url = URL.createObjectURL(blob);
     if (isInput) {
       inputObjectUrl = url;
       $("inputAudio").src = url;
+      $("downloadOriginal").href = url;
+      $("downloadOriginal").setAttribute("aria-disabled", "false");
+    } else if (which === "old") {
+      oldObjectUrl = url;
+      $("oldAudio").src = url;
+      $("downloadOld").href = url;
+      $("downloadOld").setAttribute("aria-disabled", "false");
     } else {
       outputObjectUrl = url;
       $("outputAudio").src = url;
@@ -519,11 +533,28 @@
     }
   }
 
-  async function decodeAndAnalyse(arrayBuffer) {
+  function clearInput() {
+    generation++;
+    inputSignal = null; inputFeatures = null;
+    for (const url of [inputObjectUrl, oldObjectUrl, outputObjectUrl]) if (url) URL.revokeObjectURL(url);
+    inputObjectUrl = oldObjectUrl = outputObjectUrl = "";
+    for (const id of ["inputAudio", "oldAudio", "outputAudio"]) $(id).removeAttribute("src");
+    for (const id of ["downloadOriginal", "downloadOld", "downloadWav"]) { $(id).removeAttribute("href"); $(id).setAttribute("aria-disabled", "true"); }
+    for (const id of ["evalF0In", "evalF0Out", "evalF0Ratio", "evalF1In", "evalF1Out", "evalF1Ratio", "evalF2In", "evalF2Out", "evalF2Ratio", "evalF3In", "evalF3Out", "evalF3Ratio", "evalLatency"]) $(id).textContent = "—";
+    for (const id of ["f0Result", "formantResult", "vtlResult", "auxResult", "classResult"]) $(id).textContent = "—";
+    $("confidenceResult").textContent = ""; $("confidenceBar").value = 0;
+    $("sourceProfile").value = ""; $("sourceProfile").disabled = true; $("convert").disabled = true;
+    $("recommendation").textContent = "入力解析後に相対変換量を計算します。";
+    $("manualHelp").hidden = true;
+    return generation;
+  }
+
+  async function decodeAndAnalyse(arrayBuffer, token) {
     try {
       setWorkState("デコード中");
       const context = await ensureAudioContext();
       const buffer = await context.decodeAudioData(arrayBuffer.slice(0));
+      if (token !== generation) return;
       const frames = Math.min(buffer.length, Math.floor(buffer.sampleRate * MAX_SECONDS));
       inputSignal = new Float32Array(frames);
       for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
@@ -531,9 +562,12 @@
         for (let i = 0; i < frames; i++) inputSignal[i] += data[i] / buffer.numberOfChannels;
       }
       inputSampleRate = buffer.sampleRate;
+      if (!frames) throw new Error("empty audio");
+      setAudioUrl("input", new Blob([encodeWav(inputSignal, inputSampleRate)], { type: "audio/wav" }));
       if (buffer.duration > MAX_SECONDS + .01) showToast("先頭10秒だけを解析します。", "warning");
       setWorkState("解析中");
       await new Promise(resolve => setTimeout(resolve));
+      if (token !== generation) return;
       inputFeatures = analyseSignal(inputSignal, inputSampleRate);
       renderAnalysis(inputFeatures);
       setWorkState("変換準備完了");
@@ -541,6 +575,8 @@
       $("convert").disabled = !$("sourceProfile").value;
       updateRecommendation(true);
     } catch (error) {
+      if (token !== generation) return;
+      inputSignal = null;
       console.error(error);
       setWorkState("デコード失敗");
       showToast("音声をデコードできません。別のWAV / MP3 / M4A / WebMを試してください。", "danger");
@@ -601,7 +637,7 @@
     return { profile, confidence };
   }
 
-  function estimateF0Yin(signal, sampleRate) {
+  function estimateF0Yin(signal, sampleRate, floorScale = .12) {
     const frameSize = Math.round(sampleRate * .04);
     const hop = Math.round(sampleRate * .01);
     const minTau = Math.floor(sampleRate / 500);
@@ -609,7 +645,7 @@
     let globalEnergy = 0;
     for (const sample of signal) globalEnergy += sample * sample;
     const globalRms = Math.sqrt(globalEnergy / Math.max(1, signal.length));
-    const energyFloor = Math.max(.0025, globalRms * .12);
+    const energyFloor = Math.max(floorScale === .12 ? .0025 : .00005, globalRms * floorScale);
     const frames = [];
     for (let start = 0; start + frameSize <= signal.length; start += hop) {
       let meanValue = 0;
@@ -651,11 +687,13 @@
     for (let tau = 1; tau <= maxTau; tau++) {
       running += difference[tau];
       cmndf[tau] = running ? difference[tau] * tau / running : 1;
-      if (tau >= minTau && cmndf[tau] < bestValue) {
+    }
+    for (let tau = minTau; tau <= maxTau; tau++) {
+      if (cmndf[tau] < bestValue) {
         bestValue = cmndf[tau];
         bestTau = tau;
       }
-      if (tau >= minTau && cmndf[tau] < .15) {
+      if (cmndf[tau] < .15) {
         while (tau + 1 <= maxTau && cmndf[tau + 1] < cmndf[tau]) tau++;
         bestTau = tau;
         bestValue = cmndf[tau];
@@ -780,6 +818,28 @@
     return output;
   }
 
+  function resamplePitch(signal, outputLength) {
+    if (outputLength >= signal.length || signal.length < 64) return resampleToLength(signal, outputLength);
+    const output = new Float32Array(outputLength);
+    const scale = (signal.length - 1) / Math.max(1, outputLength - 1);
+    const cutoff = .46 / scale, radius = 24;
+    for (let i = 0; i < outputLength; i++) {
+      const centre = i * scale, first = Math.floor(centre) - radius + 1;
+      let total = 0, weights = 0;
+      for (let j = 0; j < radius * 2; j++) {
+        const index = first + j, distance = index - centre;
+        const window = .5 + .5 * Math.cos(Math.PI * distance / radius);
+        const angle = 2 * Math.PI * cutoff * distance;
+        const sinc = Math.abs(angle) < 1e-12 ? 1 : Math.sin(angle) / angle;
+        const weight = 2 * cutoff * sinc * window;
+        total += signal[Math.max(0, Math.min(signal.length - 1, index))] * weight;
+        weights += weight;
+      }
+      output[i] = weights ? total / weights : 0;
+    }
+    return output;
+  }
+
   function median(values) {
     if (!values.length) return 0;
     const sorted = [...values].sort((a, b) => a - b);
@@ -809,69 +869,107 @@
     }
     const baseFormant = clamp(source.vtl / target.vtl, .8, 1.4);
     if (resetFormant) $("formantRatio").value = baseFormant.toFixed(2);
-    const pitchRatio = target.f0 / source.f0 * 2 ** (Number($("semitone").value) / 12);
+    const pitchRatio = clamp(target.f0 / source.f0 * 2 ** (Number($("semitone").value) / 12), .42, 2.7);
     $("formantValue").textContent = Number($("formantRatio").value).toFixed(2);
     const expectedF0 = inputFeatures?.f0 ? inputFeatures.f0 * pitchRatio : target.f0;
     $("recommendation").textContent = `推奨: ピッチ×${pitchRatio.toFixed(2)}（予測中央値 ${expectedF0.toFixed(0)} Hz）、フォルマント×${baseFormant.toFixed(2)}。スライダーでフォルマントだけ変更できます。`;
-    $("convert").disabled = !inputSignal;
+    $("convert").disabled = !inputSignal || !inputFeatures;
+  }
+
+  function renderDspStage(signal, sampleRate, pitchRatio, formantRatio, legacy) {
+    const pitched = Math.abs(pitchRatio - 1) < .002 ? signal.slice() :
+      (legacy ? wsolaLegacy : wsola)((legacy ? resampleToLength : resamplePitch)(signal, Math.max(legacy ? 64 : 1, Math.round(signal.length / pitchRatio))), sampleRate, pitchRatio, signal.length);
+    const correction = formantRatio / pitchRatio;
+    const processed = Math.abs(correction - 1) < .01 ? pitched : warpSpectralEnvelope(pitched, sampleRate, correction);
+    return legacy ? processed : preserveUnvoiced(signal, processed, sampleRate);
+  }
+
+  function renderConversion(signal, sampleRate, { source, target, pitchRatio, formantRatio, legacy }, renderStage = renderDspStage) {
+    const betweenAdults = (source === PROFILES.adult_m && target === PROFILES.adult_f) ||
+      (source === PROFILES.adult_f && target === PROFILES.adult_m);
+    if (legacy || !betweenAdults) return renderStage(signal, sampleRate, pitchRatio, formantRatio, legacy);
+
+    const child = PROFILES.child;
+    const childPitchRatio = child.f0 / source.f0;
+    const childFormantRatio = source.vtl / child.vtl;
+    const intermediate = renderStage(signal, sampleRate, childPitchRatio, childFormantRatio, false);
+    return renderStage(intermediate, sampleRate, pitchRatio / childPitchRatio, formantRatio / childFormantRatio, false);
   }
 
   async function convertSignal() {
     const source = PROFILES[$("sourceProfile").value];
     const target = PROFILES[$("targetProfile").value];
-    if (!inputSignal || !source || !target) return;
-    $("convert").disabled = true;
-    setWorkState("変換中");
+    if (!inputSignal || !inputFeatures || !source || !target) return;
+    const signal = inputSignal.slice(), sampleRate = inputSampleRate, token = ++generation;
+    for (const url of [oldObjectUrl, outputObjectUrl]) if (url) URL.revokeObjectURL(url);
+    oldObjectUrl = outputObjectUrl = "";
+    for (const id of ["oldAudio", "outputAudio"]) $(id).removeAttribute("src");
+    for (const id of ["downloadOld", "downloadWav"]) { $(id).removeAttribute("href"); $(id).setAttribute("aria-disabled", "true"); }
+    for (const id of ["evalF0Out", "evalF0Ratio", "evalF1Out", "evalF1Ratio", "evalF2Out", "evalF2Ratio", "evalF3Out", "evalF3Ratio", "evalLatency"]) $(id).textContent = "—";
+    const pitchRatio = clamp(target.f0 / source.f0 * 2 ** (Number($("semitone").value) / 12), .42, 2.7);
+    const formantRatio = Number($("formantRatio").value);
+    $("convert").disabled = true; setWorkState("変換中");
     const started = performance.now();
     try {
       await new Promise(resolve => setTimeout(resolve));
-      const pitchRatio = clamp(target.f0 / source.f0 * 2 ** (Number($("semitone").value) / 12), .42, 2.7);
-      const formantRatio = Number($("formantRatio").value);
-      let pitched;
-      if (Math.abs(pitchRatio - 1) < .002) {
-        pitched = inputSignal.slice();
-      } else {
-        const resampled = resampleToLength(inputSignal, Math.max(64, Math.round(inputSignal.length / pitchRatio)));
-        pitched = wsola(resampled, inputSampleRate, pitchRatio, inputSignal.length);
-      }
-      const correction = formantRatio / pitchRatio;
-      const warped = Math.abs(correction - 1) < .01 ? pitched : warpSpectralEnvelope(pitched, inputSampleRate, correction);
-      const peak = warped.reduce((maximum, value) => Math.max(maximum, Math.abs(value)), 0) || 1;
-      const gainValue = Math.min(1, .94 / peak);
-      const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-      const offline = new Offline(1, inputSignal.length, inputSampleRate);
-      const buffer = offline.createBuffer(1, inputSignal.length, inputSampleRate);
-      buffer.copyToChannel(warped.subarray(0, inputSignal.length), 0);
-      const sourceNode = offline.createBufferSource();
-      const highpass = offline.createBiquadFilter();
-      const gain = offline.createGain();
-      sourceNode.buffer = buffer;
-      highpass.type = "highpass";
-      highpass.frequency.value = 35;
-      highpass.Q.value = .7;
-      gain.gain.value = gainValue;
-      sourceNode.connect(highpass).connect(gain).connect(offline.destination);
-      sourceNode.start();
-      const rendered = await offline.startRendering();
-      const elapsed = performance.now() - started;
-      const output = rendered.getChannelData(0).slice();
-      setAudioUrl("output", new Blob([encodeWav(output, rendered.sampleRate)], { type: "audio/wav" }));
-      $("evalLatency").textContent = `${elapsed.toFixed(0)} ms（10秒換算 ${(elapsed * MAX_SECONDS / (inputSignal.length / inputSampleRate)).toFixed(0)} ms、端末依存）`;
-      setWorkState("出力解析中");
-      await new Promise(resolve => setTimeout(resolve));
-      renderOutputEvaluation(analyseSignal(output, rendered.sampleRate));
-      setWorkState("完了");
-      showToast("変換が完了しました。", "ok");
+      if (token !== generation) return;
+      const render = async (legacy) => {
+        const processed = renderConversion(signal, sampleRate, { source, target, pitchRatio, formantRatio, legacy });
+        const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        const offline = new Offline(1, signal.length, sampleRate);
+        const buffer = offline.createBuffer(1, signal.length, sampleRate);
+        buffer.copyToChannel(processed, 0);
+        const sourceNode = offline.createBufferSource();
+        const highpass = offline.createBiquadFilter();
+        sourceNode.buffer = buffer; highpass.type = "highpass"; highpass.frequency.value = 35; highpass.Q.value = .7;
+        if (legacy) {
+          const peak = processed.reduce((m, value) => Math.max(m, Math.abs(value)), 0) || 1;
+          const gainNode = offline.createGain(); gainNode.gain.value = Math.min(1, .94 / peak);
+          sourceNode.connect(highpass).connect(gainNode).connect(offline.destination);
+        } else sourceNode.connect(highpass).connect(offline.destination);
+        sourceNode.start();
+        const rendered = await offline.startRendering();
+        const output = rendered.getChannelData(0).slice();
+        const peak = output.reduce((m, value) => Math.max(m, Math.abs(value)), 0);
+        const gain = !legacy && peak > .94 ? .94 / peak : 1;
+        for (let i = 0; i < output.length; i++) output[i] = Number.isFinite(output[i]) ? output[i] * gain : 0;
+        return output;
+      };
+      const old = await render(true);
+      if (token !== generation) return;
+      const output = await render(false);
+      if (token !== generation) return;
+      setAudioUrl("old", new Blob([encodeWav(old, sampleRate)], { type: "audio/wav" }));
+      setAudioUrl("output", new Blob([encodeWav(output, sampleRate)], { type: "audio/wav" }));
+      $("evalLatency").textContent = `${(performance.now() - started).toFixed(0)} ms（旧・新の合計、端末依存）`;
+      setWorkState("出力解析中"); await new Promise(resolve => setTimeout(resolve));
+      if (token !== generation) return;
+      renderOutputEvaluation(analyseSignal(output, sampleRate));
+      setWorkState("完了"); showToast("変換が完了しました。", "ok");
     } catch (error) {
-      console.error(error);
-      setWorkState("変換失敗");
-      showToast(`変換に失敗しました: ${error.message || error.name}`, "danger");
-    } finally {
-      $("convert").disabled = !inputSignal || !$("sourceProfile").value;
-    }
+      if (token !== generation) return;
+      console.error(error); setWorkState("変換失敗"); showToast(`変換に失敗しました: ${error.message || error.name}`, "danger");
+    } finally { if (token === generation) $("convert").disabled = !inputSignal || !inputFeatures || !$("sourceProfile").value; }
   }
 
-  function wsola(input, sampleRate, stretch, targetLength) {
+  function preserveUnvoiced(original, processed, sampleRate) {
+    const analysis = resampleToRate(original, sampleRate, ANALYSIS_RATE);
+    const pitch = estimateF0Yin(analysis, ANALYSIS_RATE, .004);
+    if (!pitch.frames.length) return original.slice();
+    const hop = Math.round(ANALYSIS_RATE * .01), half = Math.round(ANALYSIS_RATE * .02);
+    const weights = pitch.frames.map(frame => frame.f0 > 0 ? 1 : 0);
+    const smooth = weights.map((_, i) => (weights[Math.max(0, i - 1)] + 2 * weights[i] + weights[Math.min(weights.length - 1, i + 1)]) / 4);
+    const out = new Float32Array(original.length);
+    for (let i = 0; i < out.length; i++) {
+      const pos = clamp((i * ANALYSIS_RATE / sampleRate - half) / hop, 0, smooth.length - 1);
+      const lo = Math.floor(pos), frac = pos - lo;
+      const mix = smooth[lo] * (1 - frac) + smooth[Math.min(lo + 1, smooth.length - 1)] * frac;
+      out[i] = original[i] * (1 - mix) + processed[i] * mix;
+    }
+    return out;
+  }
+
+  function wsolaLegacy(input, sampleRate, stretch, targetLength) {
     if (input.length < 128) return resampleToLength(input, targetLength);
     let frameSize = Math.round(sampleRate * .04);
     frameSize += frameSize % 2;
@@ -912,6 +1010,55 @@
     }
     const result = new Float32Array(targetLength);
     for (let i = 0; i < targetLength; i++) result[i] = weights[i] ? output[i] / weights[i] : 0;
+    return result;
+
+    function addFrame(inputPosition, outputPosition) {
+      for (let i = 0; i < frameSize && outputPosition + i < output.length; i++) {
+        const weight = window[i];
+        output[outputPosition + i] += (input[inputPosition + i] || 0) * weight;
+        weights[outputPosition + i] += weight;
+      }
+    }
+  }
+
+  function wsola(input, sampleRate, stretch, targetLength) {
+    if (input.length < 128) return resampleToLength(input, targetLength);
+    let frameSize = Math.round(sampleRate * .04);
+    frameSize += frameSize % 2;
+    frameSize = Math.min(frameSize, input.length);
+    const overlap = frameSize >> 1;
+    const synthesisHop = overlap;
+    const searchRadius = Math.round(sampleRate * .008);
+    const step = Math.max(1, Math.round(sampleRate / 12000));
+    const output = new Float32Array(targetLength + frameSize);
+    const weights = new Float32Array(output.length);
+    const window = new Float32Array(frameSize);
+    for (let i = 0; i < frameSize; i++) window[i] = .5 - .5 * Math.cos(2 * Math.PI * i / (frameSize - 1));
+    addFrame(0, 0);
+    for (let outputPosition = synthesisHop; outputPosition < targetLength; outputPosition += synthesisHop) {
+      const predicted = outputPosition / stretch;
+      const minimum = clamp(Math.round(predicted - searchRadius), 0, Math.max(0, input.length - frameSize));
+      const maximum = clamp(Math.round(predicted + searchRadius), minimum, Math.max(minimum, input.length - frameSize));
+      let bestPosition = clamp(Math.round(predicted), minimum, maximum);
+      let bestScore = -Infinity;
+      for (let candidate = minimum; candidate <= maximum; candidate += step) {
+        let cross = 0;
+        let energyA = 1e-12;
+        let energyB = 1e-12;
+        for (let i = 0; i < overlap; i += step) {
+          const existing = weights[outputPosition + i] ? output[outputPosition + i] / weights[outputPosition + i] : 0;
+          const incoming = input[candidate + i] || 0;
+          cross += existing * incoming;
+          energyA += existing * existing;
+          energyB += incoming * incoming;
+        }
+        const score = cross / Math.sqrt(energyA * energyB);
+        if (score > bestScore + 1e-12 || (Math.abs(score - bestScore) <= 1e-12 && Math.abs(candidate - predicted) < Math.abs(bestPosition - predicted))) { bestScore = score; bestPosition = candidate; }
+      }
+      addFrame(bestPosition, outputPosition);
+    }
+    const result = new Float32Array(targetLength);
+    for (let i = 0; i < targetLength; i++) result[i] = weights[i] ? output[i] / weights[i] : (input[Math.min(input.length - 1, Math.round(i / stretch))] || 0);
     return result;
 
     function addFrame(inputPosition, outputPosition) {
@@ -1077,6 +1224,48 @@
 
       const wav = new Uint8Array(encodeWav(sine.subarray(0, 100), sampleRate));
       check("16-bit PCM WAVヘッダ", String.fromCharCode(...wav.subarray(0, 4)) === "RIFF" && String.fromCharCode(...wav.subarray(8, 12)) === "WAVE");
+
+      const routes = [
+        ["adult_m", "adult_f", false, true],
+        ["adult_f", "adult_m", false, true],
+        ["adult_m", "child", false, false],
+        ["adult_f", "child", false, false],
+        ["child", "adult_m", false, false],
+        ["child", "adult_f", false, false],
+        ["adult_m", "adult_m", false, false],
+        ["adult_f", "adult_f", false, false],
+        ["child", "child", false, false],
+        ["adult_m", "adult_f", true, false],
+        ["adult_f", "adult_m", true, false]
+      ];
+      const sample = sine.subarray(0, 4096);
+      const child = PROFILES.child;
+      for (const [sourceKey, targetKey, legacy, viaChild] of routes) {
+        const source = PROFILES[sourceKey], target = PROFILES[targetKey];
+        const pitchRatio = target.f0 / source.f0 * .92;
+        const formantRatio = 1.07;
+        const expected = viaChild ? [
+          [child.f0 / source.f0, source.vtl / child.vtl],
+          [target.f0 / child.f0 * .92, formantRatio * child.vtl / source.vtl]
+        ] : [[pitchRatio, formantRatio]];
+        const calls = [];
+        const output = renderConversion(sample, sampleRate, { source, target, pitchRatio, formantRatio, legacy },
+          (input, rate, pitch, formant, stageLegacy) => {
+            const processed = renderDspStage(input, rate, pitch, formant, stageLegacy);
+            calls.push({ input, rate, pitch, formant, legacy: stageLegacy, output: processed });
+            return processed;
+          });
+        const ordered = calls.length === expected.length && expected.every(([pitch, formant], index) => {
+          const call = calls[index];
+          return call.input === (index === 0 ? sample : calls[index - 1].output) &&
+            call.rate === sampleRate && call.legacy === legacy &&
+            Math.abs(call.pitch - pitch) < 1e-9 && Math.abs(call.formant - formant) < 1e-9;
+        });
+        const valid = output === calls[calls.length - 1]?.output && output.length === sample.length && output.every(Number.isFinite);
+        const path = viaChild ? `${sourceKey} → child → ${targetKey}` : `${sourceKey} → ${targetKey}`;
+        check(`${legacy ? "旧" : "新"}方式 ${path}`, ordered && valid,
+          `段数 ${calls.length}/${expected.length}・順序と倍率 ${ordered ? "OK" : "NG"}・出力長と有限値 ${valid ? "OK" : "NG"}`);
+      }
     } catch (error) {
       console.error(error);
       check("自己テスト実行", false, error.message);
@@ -1111,8 +1300,9 @@
   $("fileInput").addEventListener("change", async event => {
     const file = event.target.files[0];
     if (!file) return;
-    setAudioUrl("input", file);
-    await decodeAndAnalyse(await file.arrayBuffer());
+    const token = clearInput();
+    try { await decodeAndAnalyse(await file.arrayBuffer(), token); }
+    catch (error) { if (token === generation) { setWorkState("読込失敗"); showToast("音声ファイルを読み込めません。", "danger"); } }
   });
   $("sourceProfile").addEventListener("change", () => updateRecommendation(true));
   $("targetProfile").addEventListener("change", () => updateRecommendation(true));
