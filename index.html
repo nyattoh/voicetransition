@@ -876,6 +876,26 @@
     $("convert").disabled = !inputSignal || !inputFeatures;
   }
 
+  function renderDspStage(signal, sampleRate, pitchRatio, formantRatio, legacy) {
+    const pitched = Math.abs(pitchRatio - 1) < .002 ? signal.slice() :
+      (legacy ? wsolaLegacy : wsola)((legacy ? resampleToLength : resamplePitch)(signal, Math.max(legacy ? 64 : 1, Math.round(signal.length / pitchRatio))), sampleRate, pitchRatio, signal.length);
+    const correction = formantRatio / pitchRatio;
+    const processed = Math.abs(correction - 1) < .01 ? pitched : warpSpectralEnvelope(pitched, sampleRate, correction);
+    return legacy ? processed : preserveUnvoiced(signal, processed, sampleRate);
+  }
+
+  function renderConversion(signal, sampleRate, { source, target, pitchRatio, formantRatio, legacy }, renderStage = renderDspStage) {
+    const betweenAdults = (source === PROFILES.adult_m && target === PROFILES.adult_f) ||
+      (source === PROFILES.adult_f && target === PROFILES.adult_m);
+    if (legacy || !betweenAdults) return renderStage(signal, sampleRate, pitchRatio, formantRatio, legacy);
+
+    const child = PROFILES.child;
+    const childPitchRatio = child.f0 / source.f0;
+    const childFormantRatio = source.vtl / child.vtl;
+    const intermediate = renderStage(signal, sampleRate, childPitchRatio, childFormantRatio, false);
+    return renderStage(intermediate, sampleRate, pitchRatio / childPitchRatio, formantRatio / childFormantRatio, false);
+  }
+
   async function convertSignal() {
     const source = PROFILES[$("sourceProfile").value];
     const target = PROFILES[$("targetProfile").value];
@@ -894,11 +914,7 @@
       await new Promise(resolve => setTimeout(resolve));
       if (token !== generation) return;
       const render = async (legacy) => {
-        const pitched = Math.abs(pitchRatio - 1) < .002 ? signal.slice() :
-          (legacy ? wsolaLegacy : wsola)((legacy ? resampleToLength : resamplePitch)(signal, Math.max(legacy ? 64 : 1, Math.round(signal.length / pitchRatio))), sampleRate, pitchRatio, signal.length);
-        const correction = formantRatio / pitchRatio;
-        let processed = Math.abs(correction - 1) < .01 ? pitched : warpSpectralEnvelope(pitched, sampleRate, correction);
-        if (!legacy) processed = preserveUnvoiced(signal, processed, sampleRate);
+        const processed = renderConversion(signal, sampleRate, { source, target, pitchRatio, formantRatio, legacy });
         const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
         const offline = new Offline(1, signal.length, sampleRate);
         const buffer = offline.createBuffer(1, signal.length, sampleRate);
@@ -1208,6 +1224,48 @@
 
       const wav = new Uint8Array(encodeWav(sine.subarray(0, 100), sampleRate));
       check("16-bit PCM WAVヘッダ", String.fromCharCode(...wav.subarray(0, 4)) === "RIFF" && String.fromCharCode(...wav.subarray(8, 12)) === "WAVE");
+
+      const routes = [
+        ["adult_m", "adult_f", false, true],
+        ["adult_f", "adult_m", false, true],
+        ["adult_m", "child", false, false],
+        ["adult_f", "child", false, false],
+        ["child", "adult_m", false, false],
+        ["child", "adult_f", false, false],
+        ["adult_m", "adult_m", false, false],
+        ["adult_f", "adult_f", false, false],
+        ["child", "child", false, false],
+        ["adult_m", "adult_f", true, false],
+        ["adult_f", "adult_m", true, false]
+      ];
+      const sample = sine.subarray(0, 4096);
+      const child = PROFILES.child;
+      for (const [sourceKey, targetKey, legacy, viaChild] of routes) {
+        const source = PROFILES[sourceKey], target = PROFILES[targetKey];
+        const pitchRatio = target.f0 / source.f0 * .92;
+        const formantRatio = 1.07;
+        const expected = viaChild ? [
+          [child.f0 / source.f0, source.vtl / child.vtl],
+          [target.f0 / child.f0 * .92, formantRatio * child.vtl / source.vtl]
+        ] : [[pitchRatio, formantRatio]];
+        const calls = [];
+        const output = renderConversion(sample, sampleRate, { source, target, pitchRatio, formantRatio, legacy },
+          (input, rate, pitch, formant, stageLegacy) => {
+            const processed = renderDspStage(input, rate, pitch, formant, stageLegacy);
+            calls.push({ input, rate, pitch, formant, legacy: stageLegacy, output: processed });
+            return processed;
+          });
+        const ordered = calls.length === expected.length && expected.every(([pitch, formant], index) => {
+          const call = calls[index];
+          return call.input === (index === 0 ? sample : calls[index - 1].output) &&
+            call.rate === sampleRate && call.legacy === legacy &&
+            Math.abs(call.pitch - pitch) < 1e-9 && Math.abs(call.formant - formant) < 1e-9;
+        });
+        const valid = output === calls[calls.length - 1]?.output && output.length === sample.length && output.every(Number.isFinite);
+        const path = viaChild ? `${sourceKey} → child → ${targetKey}` : `${sourceKey} → ${targetKey}`;
+        check(`${legacy ? "旧" : "新"}方式 ${path}`, ordered && valid,
+          `段数 ${calls.length}/${expected.length}・順序と倍率 ${ordered ? "OK" : "NG"}・出力長と有限値 ${valid ? "OK" : "NG"}`);
+      }
     } catch (error) {
       console.error(error);
       check("自己テスト実行", false, error.message);
